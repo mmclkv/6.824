@@ -3,11 +3,13 @@ package raftkv
 import "labrpc"
 import "crypto/rand"
 import "math/big"
+//import "fmt"
 
 
 type Clerk struct {
 	servers []*labrpc.ClientEnd
-	// You will have to modify this struct.
+	Id int64
+	commandId int
 }
 
 func nrand() int64 {
@@ -20,7 +22,8 @@ func nrand() int64 {
 func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
-	// You'll have to add code here.
+	ck.Id = nrand()
+	ck.commandId = 0
 	return ck
 }
 
@@ -37,7 +40,26 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 // arguments. and reply must be passed as a pointer.
 //
 func (ck *Clerk) Get(key string) string {
-
+	var args GetArgs
+	args.Key = key
+	args.Id = ck.Id
+	ck.commandId++
+	args.CommandId = ck.commandId
+	for {
+		for i := 0; i < len(ck.servers); i++ {
+			//fmt.Println("Get", key, "from server", i)
+			var reply GetReply
+			ok := ck.servers[i].Call("RaftKV.Get", &args, &reply)
+			//fmt.Println("reply.WrongLeader:", reply.WrongLeader)
+			//fmt.Println("reply.Err:", reply.Err)
+			//fmt.Println("reply.Value:", reply.Value)
+			if ok {
+				if reply.WrongLeader == false && reply.Err == OK {
+					return reply.Value
+				}
+			}
+		}
+	}
 	// You will have to modify this function.
 	return ""
 }
@@ -53,7 +75,27 @@ func (ck *Clerk) Get(key string) string {
 // arguments. and reply must be passed as a pointer.
 //
 func (ck *Clerk) PutAppend(key string, value string, op string) {
-	// You will have to modify this function.
+	var args PutAppendArgs
+	args.Key = key
+	args.Value = value
+	args.Op = op
+	args.Id = ck.Id
+	ck.commandId++
+	args.CommandId = ck.commandId
+	for {
+		for i := 0; i < len(ck.servers); i++ {
+			//fmt.Println("Put", key, "to", value, "at server", i)
+			var reply PutAppendReply
+			ok := ck.servers[i].Call("RaftKV.PutAppend", &args, &reply)
+			//fmt.Println("reply.WrongLeader:", reply.WrongLeader)
+			//fmt.Println("reply.Err:", reply.Err)
+			if ok {
+				if reply.WrongLeader == false && reply.Err == OK {
+					return
+				}
+			}
+		}
+	}
 }
 
 func (ck *Clerk) Put(key string, value string) {

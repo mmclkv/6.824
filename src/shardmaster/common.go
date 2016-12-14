@@ -38,6 +38,8 @@ const (
 type Err string
 
 type JoinArgs struct {
+	Id int64
+	CommandId int
 	Servers map[int][]string // new GID -> servers mappings
 }
 
@@ -47,6 +49,8 @@ type JoinReply struct {
 }
 
 type LeaveArgs struct {
+	Id int64
+	CommandId int
 	GIDs []int
 }
 
@@ -56,6 +60,8 @@ type LeaveReply struct {
 }
 
 type MoveArgs struct {
+	Id int64
+	CommandId int
 	Shard int
 	GID   int
 }

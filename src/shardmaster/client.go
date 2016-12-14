@@ -8,10 +8,12 @@ import "labrpc"
 import "time"
 import "crypto/rand"
 import "math/big"
+import "fmt"
 
 type Clerk struct {
 	servers []*labrpc.ClientEnd
-	// Your data here.
+	Id int64
+	commandId int
 }
 
 func nrand() int64 {
@@ -24,20 +26,21 @@ func nrand() int64 {
 func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
-	// Your code here.
+	ck.Id = nrand()
+	ck.commandId = 0
 	return ck
 }
 
 func (ck *Clerk) Query(num int) Config {
 	args := &QueryArgs{}
-	// Your code here.
 	args.Num = num
 	for {
 		// try each known server.
-		for _, srv := range ck.servers {
+		for i, srv := range ck.servers {
 			var reply QueryReply
 			ok := srv.Call("ShardMaster.Query", args, &reply)
 			if ok && reply.WrongLeader == false {
+				fmt.Println("query from peer", i)
 				return reply.Config
 			}
 		}
@@ -47,7 +50,9 @@ func (ck *Clerk) Query(num int) Config {
 
 func (ck *Clerk) Join(servers map[int][]string) {
 	args := &JoinArgs{}
-	// Your code here.
+	args.Id = ck.Id
+	ck.commandId++
+	args.CommandId = ck.commandId
 	args.Servers = servers
 
 	for {
@@ -65,7 +70,9 @@ func (ck *Clerk) Join(servers map[int][]string) {
 
 func (ck *Clerk) Leave(gids []int) {
 	args := &LeaveArgs{}
-	// Your code here.
+	args.Id = ck.Id
+	ck.commandId++
+	args.CommandId = ck.commandId
 	args.GIDs = gids
 
 	for {
@@ -83,7 +90,9 @@ func (ck *Clerk) Leave(gids []int) {
 
 func (ck *Clerk) Move(shard int, gid int) {
 	args := &MoveArgs{}
-	// Your code here.
+	args.Id = ck.Id
+	ck.commandId++
+	args.CommandId = ck.commandId
 	args.Shard = shard
 	args.GID = gid
 
