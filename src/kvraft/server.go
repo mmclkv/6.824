@@ -1,13 +1,13 @@
 package raftkv
 
 import (
+	"bytes"
 	"encoding/gob"
 	"labrpc"
 	"log"
 	"raft"
 	"sync"
 	"time"
-	"bytes"
 	//"fmt"
 )
 
@@ -20,15 +20,14 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
-
 type Op struct {
 	// Your definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
 	Operation string
-	Key string
-	Value string
-	ClientId int64
+	Key       string
+	Value     string
+	ClientId  int64
 	CommandId int
 }
 
@@ -41,45 +40,44 @@ type RaftKV struct {
 	maxraftstate int // snapshot if log grows this big
 
 	// Your definitions here.
-	data map[string]string
+	data    map[string]string
 	exeChan map[int]chan Op
-	ack map[int64]int
-	alive bool
+	ack     map[int64]int
+	alive   bool
 }
-
 
 func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
 	opArg := Op{Operation: "Get", Key: args.Key, ClientId: args.Id, CommandId: args.CommandId}
 	index, _, isLeader := kv.rf.Start(opArg)
-	if (!isLeader) {
+	if !isLeader {
 		reply.WrongLeader = true
 		return
 	} else {
 		kv.mu.Lock()
 		_, ok := kv.exeChan[index]
-		if (!ok) {
+		if !ok {
 			kv.exeChan[index] = make(chan Op, 1)
 		}
 		kv.mu.Unlock()
 		select {
-			case exeArg := <- kv.exeChan[index]:
-				if opArg == exeArg {
-					reply.WrongLeader = false
-					reply.Err = OK
-					kv.mu.Lock()
-					reply.Value = kv.data[opArg.Key]
-					kv.mu.Unlock()
-					return
+		case exeArg := <-kv.exeChan[index]:
+			if opArg == exeArg {
+				reply.WrongLeader = false
+				reply.Err = OK
+				kv.mu.Lock()
+				reply.Value = kv.data[opArg.Key]
+				kv.mu.Unlock()
+				return
 			} else {
 				reply.WrongLeader = true
 				return
 			}
-			case <-time.After(1234 * time.Millisecond):
-				reply.WrongLeader = true
-				return
+		case <-time.After(1234 * time.Millisecond):
+			reply.WrongLeader = true
+			return
 		}
-				
+
 	}
 }
 
@@ -87,18 +85,18 @@ func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
 	opArg := Op{Operation: args.Op, Key: args.Key, Value: args.Value, ClientId: args.Id, CommandId: args.CommandId}
 	index, _, isLeader := kv.rf.Start(opArg)
-	if (!isLeader) {
+	if !isLeader {
 		reply.WrongLeader = true
 		return
 	} else {
 		kv.mu.Lock()
 		_, ok := kv.exeChan[index]
-		if (!ok) {
+		if !ok {
 			kv.exeChan[index] = make(chan Op, 1)
 		}
 		kv.mu.Unlock()
 		select {
-			case exeArg := <- kv.exeChan[index]:
+		case exeArg := <-kv.exeChan[index]:
 			if opArg == exeArg {
 				reply.WrongLeader = false
 				reply.Err = OK
@@ -107,11 +105,11 @@ func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 				reply.WrongLeader = true
 				return
 			}
-			case <-time.After(1234 * time.Millisecond):
-				reply.WrongLeader = true
-				return
+		case <-time.After(1234 * time.Millisecond):
+			reply.WrongLeader = true
+			return
 		}
-		
+
 	}
 }
 
@@ -128,7 +126,7 @@ func (kv *RaftKV) Kill() {
 
 func (kv *RaftKV) Applyloop() {
 	for {
-		applymsg := <- kv.applyCh
+		applymsg := <-kv.applyCh
 		//fmt.Println("get")
 		if applymsg.UseSnapshot {
 			kv.mu.Lock()
@@ -145,7 +143,7 @@ func (kv *RaftKV) Applyloop() {
 		comm := applymsg.Command.(Op)
 		kv.mu.Lock()
 		_, ok := kv.ack[comm.ClientId]
-		if (!ok) {
+		if !ok {
 			kv.ack[comm.ClientId] = 0
 		}
 		if kv.ack[comm.ClientId] < comm.CommandId {
@@ -158,12 +156,12 @@ func (kv *RaftKV) Applyloop() {
 		}
 		//fmt.Println("peer", kv.me, ":", kv.data)
 		_, ok = kv.exeChan[applymsg.Index]
-		if (!ok) {
+		if !ok {
 			kv.exeChan[applymsg.Index] = make(chan Op, 1)
 		} else {
 			select {
-				case <-kv.exeChan[applymsg.Index]:
-				default:
+			case <-kv.exeChan[applymsg.Index]:
+			default:
 			}
 			kv.exeChan[applymsg.Index] <- comm
 		}
@@ -182,7 +180,6 @@ func (kv *RaftKV) TakeSnapshot(index int) {
 	data := w.Bytes()
 	kv.rf.TakeSnapshot(data, index)
 }
-
 
 //
 // servers[] contains the ports of the set of

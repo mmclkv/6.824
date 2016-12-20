@@ -4,15 +4,18 @@ package shardmaster
 // Shardmaster clerk.
 //
 
-import "labrpc"
-import "time"
-import "crypto/rand"
-import "math/big"
-import "fmt"
+import (
+	"crypto/rand"
+	"labrpc"
+	"math/big"
+	"time"
+)
+
+//import "fmt"
 
 type Clerk struct {
-	servers []*labrpc.ClientEnd
-	Id int64
+	servers   []*labrpc.ClientEnd
+	Id        int64
 	commandId int
 }
 
@@ -36,11 +39,11 @@ func (ck *Clerk) Query(num int) Config {
 	args.Num = num
 	for {
 		// try each known server.
-		for i, srv := range ck.servers {
+		for _, srv := range ck.servers {
 			var reply QueryReply
 			ok := srv.Call("ShardMaster.Query", args, &reply)
 			if ok && reply.WrongLeader == false {
-				fmt.Println("query from peer", i)
+				//fmt.Println("query from peer", i)
 				return reply.Config
 			}
 		}

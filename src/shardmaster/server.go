@@ -1,13 +1,13 @@
 package shardmaster
 
-
-import "raft"
-import "labrpc"
-import "sync"
-import "encoding/gob"
-import "time"
-import "fmt"
-
+import (
+	"encoding/gob"
+	"fmt"
+	"labrpc"
+	"raft"
+	"sync"
+	"time"
+)
 
 type ShardMaster struct {
 	mu      sync.Mutex
@@ -15,22 +15,20 @@ type ShardMaster struct {
 	rf      *raft.Raft
 	applyCh chan raft.ApplyMsg
 
-	Shards [NShards]int
-	Groups map[int][]string
-	configs []Config // indexed by config num
+	Shards    [NShards]int
+	Groups    map[int][]string
+	configs   []Config // indexed by config num
 	configNum int
-	exeChan map[int]chan Op
-	ack map[int64]int
-	alive bool
+	exeChan   map[int]chan Op
+	ack       map[int64]int
+	alive     bool
 }
-
 
 type Op struct {
-	Conf Config
-	ClientId int64
+	Conf      Config
+	ClientId  int64
 	CommandId int
 }
-
 
 func (sm *ShardMaster) Join(args *JoinArgs, reply *JoinReply) {
 	if !sm.rf.IsLeader() {
@@ -51,17 +49,17 @@ func (sm *ShardMaster) Join(args *JoinArgs, reply *JoinReply) {
 		return
 	}
 	reverseShardTable := map[int][]int{}
-	for index, value := range(sm.Shards) {
+	for index, value := range sm.Shards {
 		if value == 0 {
 			continue
 		}
 		_, ok := reverseShardTable[value]
-		if (!ok) {
+		if !ok {
 			reverseShardTable[value] = make([]int, 0)
 		}
 		reverseShardTable[value] = append(reverseShardTable[value], index)
 	}
-	fmt.Println("reverseShardTable:", reverseShardTable)
+	//fmt.Println("reverseShardTable:", reverseShardTable)
 	var thisConfig Config
 	thisConfig.Groups = make(map[int][]string)
 	newLen := len(args.Servers) + len(sm.Groups)
@@ -76,7 +74,7 @@ func (sm *ShardMaster) Join(args *JoinArgs, reply *JoinReply) {
 		for i := 0; i < NShards; i++ {
 			num[i] = i
 		}
-		for key, _ := range(args.Servers) {
+		for key, _ := range args.Servers {
 			if numOfMore < totalMore {
 				reverseShardTable[key] = num[0:more]
 				num = num[more:]
@@ -89,7 +87,7 @@ func (sm *ShardMaster) Join(args *JoinArgs, reply *JoinReply) {
 		}
 	} else {
 		num := make([]int, 0)
-		for key, _ := range(reverseShardTable) {
+		for key, _ := range reverseShardTable {
 			if len(reverseShardTable[key]) == more {
 				if numOfMore < totalMore {
 					numOfMore++
@@ -114,7 +112,7 @@ func (sm *ShardMaster) Join(args *JoinArgs, reply *JoinReply) {
 				}
 			}
 		}
-		for key, _ := range(args.Servers) {
+		for key, _ := range args.Servers {
 			if numOfMore < totalMore {
 				reverseShardTable[key] = num[0:more]
 				num = num[more:]
@@ -125,36 +123,36 @@ func (sm *ShardMaster) Join(args *JoinArgs, reply *JoinReply) {
 				numOfLess++
 			}
 		}
-		fmt.Println("reverseShardTable after apply:", reverseShardTable)
+		//fmt.Println("reverseShardTable after apply:", reverseShardTable)
 	}
 
-	for key, value := range(sm.Groups) {
+	for key, value := range sm.Groups {
 		thisConfig.Groups[key] = value
 	}
-	for key, value := range(args.Servers) {
+	for key, value := range args.Servers {
 		thisConfig.Groups[key] = value
 	}
 
 	for key, values := range reverseShardTable {
-		for _, value := range(values) {
+		for _, value := range values {
 			thisConfig.Shards[value] = key
-			fmt.Println("thisConfig.Shards[", value, "]=", key)
+			//fmt.Println("thisConfig.Shards[", value, "]=", key)
 		}
 	}
-	fmt.Println("ShardTable after apply:", thisConfig.Shards)
+	//fmt.Println("ShardTable after apply:", thisConfig.Shards)
 	OpArg := Op{Conf: thisConfig, ClientId: args.Id, CommandId: args.CommandId}
 	index, _, _ := sm.rf.Start(OpArg)
-	fmt.Println("current Shard:", sm.Shards)
-	fmt.Println("current Group:", sm.Groups)
+	//fmt.Println("current Shard:", sm.Shards)
+	//fmt.Println("current Group:", sm.Groups)
 	fmt.Println("joins", args.Servers)
 	//sm.mu.Lock()
 	_, ok := sm.exeChan[index]
-	if (!ok) {
+	if !ok {
 		sm.exeChan[index] = make(chan Op, 1)
 	}
 	//sm.mu.Unlock()
 	select {
-		case exeArg := <- sm.exeChan[index]:
+	case exeArg := <-sm.exeChan[index]:
 		if OpArg.ClientId == exeArg.ClientId && OpArg.CommandId == exeArg.CommandId {
 			reply.WrongLeader = false
 			reply.Err = OK
@@ -163,9 +161,9 @@ func (sm *ShardMaster) Join(args *JoinArgs, reply *JoinReply) {
 			reply.WrongLeader = true
 			return
 		}
-		case <-time.After(1234 * time.Millisecond):
-			reply.WrongLeader = true
-			return
+	case <-time.After(1234 * time.Millisecond):
+		reply.WrongLeader = true
+		return
 	}
 }
 
@@ -191,22 +189,22 @@ func (sm *ShardMaster) Leave(args *LeaveArgs, reply *LeaveReply) {
 		return
 	}
 	reverseShardTable := map[int][]int{}
-	for key, _ := range(sm.Groups) {
+	for key, _ := range sm.Groups {
 		reverseShardTable[key] = make([]int, 0)
 	}
-	for index, value := range(sm.Shards) {
+	for index, value := range sm.Shards {
 		if value == 0 {
 			continue
 		}
 		_, ok := reverseShardTable[value]
-		if (!ok) {
+		if !ok {
 			reverseShardTable[value] = make([]int, 0)
 		}
 		reverseShardTable[value] = append(reverseShardTable[value], index)
 	}
 	num := make([]int, 0)
 	count := 0
-	for _, value := range(args.GIDs) {
+	for _, value := range args.GIDs {
 		_, ok := reverseShardTable[value]
 		if ok {
 			num = append(num, reverseShardTable[value]...)
@@ -221,7 +219,7 @@ func (sm *ShardMaster) Leave(args *LeaveArgs, reply *LeaveReply) {
 	totalLess := newLen - totalMore
 	numOfMore := 0
 	numOfLess := 0
-	for key, _ := range(reverseShardTable) {
+	for key, _ := range reverseShardTable {
 		if len(reverseShardTable[key]) < less {
 			if numOfLess < totalLess {
 				addLen := less - len(reverseShardTable[key])
@@ -251,26 +249,26 @@ func (sm *ShardMaster) Leave(args *LeaveArgs, reply *LeaveReply) {
 	}
 	var thisConfig Config
 	thisConfig.Groups = make(map[int][]string)
-	for key, values := range(reverseShardTable) {
+	for key, values := range reverseShardTable {
 		thisConfig.Groups[key] = sm.Groups[key]
-		for _, value := range(values) {
+		for _, value := range values {
 			thisConfig.Shards[value] = key
-			fmt.Println("thisConfig.Shards[", value, "]=", key)
+			//fmt.Println("thisConfig.Shards[", value, "]=", key)
 		}
 	}
 	OpArg := Op{Conf: thisConfig, ClientId: args.Id, CommandId: args.CommandId}
 	index, _, _ := sm.rf.Start(OpArg)
-	fmt.Println("current Shard:", sm.Shards)
-	fmt.Println("current Group:", sm.Groups)
+	//fmt.Println("current Shard:", sm.Shards)
+	//fmt.Println("current Group:", sm.Groups)
 	fmt.Println("leaves", args.GIDs)
 	//sm.mu.Lock()
 	_, ok := sm.exeChan[index]
-	if (!ok) {
+	if !ok {
 		sm.exeChan[index] = make(chan Op, 1)
 	}
 	//sm.mu.Unlock()
 	select {
-		case exeArg := <- sm.exeChan[index]:
+	case exeArg := <-sm.exeChan[index]:
 		if OpArg.ClientId == exeArg.ClientId && OpArg.CommandId == exeArg.CommandId {
 			reply.WrongLeader = false
 			reply.Err = OK
@@ -279,9 +277,9 @@ func (sm *ShardMaster) Leave(args *LeaveArgs, reply *LeaveReply) {
 			reply.WrongLeader = true
 			return
 		}
-		case <-time.After(1234 * time.Millisecond):
-			reply.WrongLeader = true
-			return
+	case <-time.After(1234 * time.Millisecond):
+		reply.WrongLeader = true
+		return
 	}
 }
 
@@ -296,22 +294,22 @@ func (sm *ShardMaster) Move(args *MoveArgs, reply *MoveReply) {
 	thisConfig.Shards = sm.Shards
 	thisConfig.Shards[args.Shard] = args.GID
 	thisConfig.Groups = make(map[int][]string)
-	for key, value := range(sm.Groups) {
+	for key, value := range sm.Groups {
 		thisConfig.Groups[key] = value
 	}
 	OpArg := Op{Conf: thisConfig, ClientId: args.Id, CommandId: args.CommandId}
 	index, _, _ := sm.rf.Start(OpArg)
-	fmt.Println("current Shard:", sm.Shards)
-	fmt.Println("current Group:", sm.Groups)
-	fmt.Println("move shard", args.Shard, "to group", args.GID)
+	//fmt.Println("current Shard:", sm.Shards)
+	//fmt.Println("current Group:", sm.Groups)
+	//fmt.Println("move shard", args.Shard, "to group", args.GID)
 	//sm.mu.Lock()
 	_, ok := sm.exeChan[index]
-	if (!ok) {
+	if !ok {
 		sm.exeChan[index] = make(chan Op, 1)
 	}
 	//sm.mu.Unlock()
 	select {
-		case exeArg := <- sm.exeChan[index]:
+	case exeArg := <-sm.exeChan[index]:
 		if OpArg.ClientId == exeArg.ClientId && OpArg.CommandId == exeArg.CommandId {
 			reply.WrongLeader = false
 			reply.Err = OK
@@ -320,9 +318,9 @@ func (sm *ShardMaster) Move(args *MoveArgs, reply *MoveReply) {
 			reply.WrongLeader = true
 			return
 		}
-		case <-time.After(1234 * time.Millisecond):
-			reply.WrongLeader = true
-			return
+	case <-time.After(1234 * time.Millisecond):
+		reply.WrongLeader = true
+		return
 	}
 }
 
@@ -330,23 +328,22 @@ func (sm *ShardMaster) Query(args *QueryArgs, reply *QueryReply) {
 	// Your code here.
 	if !sm.rf.IsLeader() {
 		reply.WrongLeader = true
-		return 
+		return
 	} else {
 		sm.mu.Lock()
 		defer sm.mu.Unlock()
 		reply.WrongLeader = false
 		reply.Err = OK
-		fmt.Println("current configs of peer", sm.me, ":", sm.configs)
-		fmt.Println("configNum:", sm.configNum)
+		//fmt.Println("current configs of peer", sm.me, ":", sm.configs)
+		//fmt.Println("configNum:", sm.configNum)
 		if args.Num == -1 || args.Num >= sm.configNum {
-			reply.Config = sm.configs[sm.configNum - 1]
+			reply.Config = sm.configs[sm.configNum-1]
 		} else {
 			reply.Config = sm.configs[args.Num]
 		}
-		fmt.Println("reply.Config:", reply.Config)
+		//fmt.Println("reply.Config:", reply.Config)
 	}
 }
-
 
 //
 // the tester calls Kill() when a ShardMaster instance won't
@@ -373,35 +370,37 @@ func (sm *ShardMaster) Raft() *raft.Raft {
 
 func (sm *ShardMaster) Applyloop() {
 	for {
-		applymsg := <- sm.applyCh
+		applymsg := <-sm.applyCh
 		comm := applymsg.Command.(Op)
 		//sm.mu.Lock()
 		_, ok := sm.ack[comm.ClientId]
-		if (!ok) {
+		if !ok {
 			sm.ack[comm.ClientId] = 0
 		}
 		if sm.ack[comm.ClientId] < comm.CommandId {
 			sm.Shards = comm.Conf.Shards
 			sm.Groups = make(map[int][]string)
-			for key, value := range(comm.Conf.Groups) {
+			for key, value := range comm.Conf.Groups {
 				sm.Groups[key] = value
 			}
 			comm.Conf.Num = sm.configNum
 			sm.configNum++
 			sm.configs = append(sm.configs, comm.Conf)
-			fmt.Println("Shards of peer", sm.me, "after apply:", sm.Shards)
-			fmt.Println("Groups of peer", sm.me, "after apply:", sm.Groups)
-			fmt.Println("Configs of peer", sm.me, "after apply:", sm.configs)
-			fmt.Println("ConfigNum of peer", sm.me, "after apply:", sm.configNum)
+			if sm.rf.IsLeader() {
+				fmt.Println("Shards after apply:", sm.Shards)
+				fmt.Println("Groups after apply:", sm.Groups)
+			}
+			//fmt.Println("Configs of peer", sm.me, "after apply:", sm.configs)
+			//fmt.Println("ConfigNum of peer", sm.me, "after apply:", sm.configNum)
 			sm.ack[comm.ClientId] = comm.CommandId
 		}
 		_, ok = sm.exeChan[applymsg.Index]
-		if (!ok) {
+		if !ok {
 			sm.exeChan[applymsg.Index] = make(chan Op, 1)
 		} else {
 			select {
-				case <-sm.exeChan[applymsg.Index]:
-				default:
+			case <-sm.exeChan[applymsg.Index]:
+			default:
 			}
 			sm.exeChan[applymsg.Index] <- comm
 		}
@@ -425,9 +424,9 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister)
 	sm.ack = make(map[int64]int)
 
 	if len(sm.rf.Log) > 1 {
-		lastConfig := sm.rf.Log[len(sm.rf.Log) - 1].Command.(Op).Conf
+		lastConfig := sm.rf.Log[len(sm.rf.Log)-1].Command.(Op).Conf
 		sm.Shards = lastConfig.Shards
-		for key, value := range(lastConfig.Groups) {
+		for key, value := range lastConfig.Groups {
 			sm.Groups[key] = value
 		}
 		sm.configNum = len(sm.rf.Log)
@@ -437,7 +436,6 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister)
 			sm.configs = append(sm.configs, currConfig)
 		}
 	}
-	
 
 	go sm.Applyloop()
 
