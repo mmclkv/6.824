@@ -2,7 +2,6 @@ package shardmaster
 
 import (
 	"encoding/gob"
-	"fmt"
 	"labrpc"
 	"raft"
 	"sync"
@@ -144,7 +143,7 @@ func (sm *ShardMaster) Join(args *JoinArgs, reply *JoinReply) {
 	index, _, _ := sm.rf.Start(OpArg)
 	//fmt.Println("current Shard:", sm.Shards)
 	//fmt.Println("current Group:", sm.Groups)
-	fmt.Println("joins", args.Servers)
+	//fmt.Println("joins", args.Servers)
 	//sm.mu.Lock()
 	_, ok := sm.exeChan[index]
 	if !ok {
@@ -260,7 +259,7 @@ func (sm *ShardMaster) Leave(args *LeaveArgs, reply *LeaveReply) {
 	index, _, _ := sm.rf.Start(OpArg)
 	//fmt.Println("current Shard:", sm.Shards)
 	//fmt.Println("current Group:", sm.Groups)
-	fmt.Println("leaves", args.GIDs)
+	//fmt.Println("leaves", args.GIDs)
 	//sm.mu.Lock()
 	_, ok := sm.exeChan[index]
 	if !ok {
@@ -387,8 +386,7 @@ func (sm *ShardMaster) Applyloop() {
 			sm.configNum++
 			sm.configs = append(sm.configs, comm.Conf)
 			if sm.rf.IsLeader() {
-				fmt.Println("Shards after apply:", sm.Shards)
-				fmt.Println("Groups after apply:", sm.Groups)
+				//fmt.Println("Shards after apply:", sm.Shards)
 			}
 			//fmt.Println("Configs of peer", sm.me, "after apply:", sm.configs)
 			//fmt.Println("ConfigNum of peer", sm.me, "after apply:", sm.configNum)

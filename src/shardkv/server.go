@@ -37,35 +37,38 @@ type ShardKV struct {
 	maxraftstate int // snapshot if log grows this big
 
 	// Your definitions here.
-	alive      bool
-	sm         *shardmaster.Clerk
-	config     shardmaster.Config
-	data       map[string]string
-	exeChan    map[int]chan Op
-	shardChan  map[int][shardmaster.NShards]chan int
-	configChan chan shardmaster.Config
-	ack        map[int64]int
+	alive       bool
+	sm          *shardmaster.Clerk
+	config      shardmaster.Config
+	data        map[string]string
+	ack         map[int64]int
+	exeChan     map[int]chan Op
+	shardChan   map[int][shardmaster.NShards]chan int
+	configReq   chan shardmaster.Config
+	configAck   chan shardmaster.Config
+	transferAck [shardmaster.NShards]int
 }
 
 func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
-	// Your code here.
-	//fmt.Println("group", kv.gid, "'s data:", kv.data)
+	if !kv.alive {
+		reply.Err = ErrGet
+		return
+	}
 	if !kv.rf.IsLeader() {
 		reply.WrongLeader = true
 		return
 	}
 	currConfig := kv.sm.Query(-1)
-	for kv.config.Num < currConfig.Num {
-		fmt.Println("kv.config.Num:", kv.config.Num)
-		fmt.Println("currConfig.Num:", currConfig.Num)
-		time.Sleep(500 * time.Millisecond)
+	if kv.config.Num < currConfig.Num {
+		reply.Err = ErrOldConfig
+		return
 	}
 	shard := key2shard(args.Key)
 	if currConfig.Shards[shard] != kv.gid {
 		reply.Err = ErrWrongGroup
 		return
 	}
-	fmt.Println("Get", args.Key, "at group", kv.gid, "at config", kv.config.Num)
+	fmt.Println("Get", args.Key, "(shard", shard, ") at group", kv.gid, "at config", kv.config.Num)
 	opArg := Op{Operation: "Get", Key: args.Key, Config: kv.config, ClientId: args.Id, CommandId: args.CommandId}
 	index, _, isLeader := kv.rf.Start(opArg)
 	if !isLeader {
@@ -87,12 +90,15 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 			if ok {
 				reply.Err = OK
 				reply.Value = value
+				fmt.Println("value of key", opArg.Key, ":", value)
 			} else {
 				reply.Err = ErrNoKey
 			}
 			kv.mu.Unlock()
-			return
+		} else {
+			reply.Err = ErrGet
 		}
+		return
 	case <-time.After(1234 * time.Millisecond):
 		reply.Err = ErrTimeOut
 		return
@@ -100,31 +106,31 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 }
 
 func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
-	// Your code here.
-	//kv.config = kv.sm.Query(-1)
-	//fmt.Println("group", kv.gid, "'s data:", kv.data)
+	if !kv.alive {
+		reply.Err = ErrPutAppend
+		return
+	}
 	if !kv.rf.IsLeader() {
 		reply.WrongLeader = true
 		return
 	}
 	currConfig := kv.sm.Query(-1)
-	for kv.config.Num < currConfig.Num {
-		//fmt.Println("kv.config.Num:", kv.config.Num)
-		//fmt.Println("currConfig.Num:", currConfig.Num)
-		time.Sleep(500 * time.Millisecond)
+	if kv.config.Num < currConfig.Num {
+		reply.Err = ErrOldConfig
+		return
 	}
 	shard := key2shard(args.Key)
 	if currConfig.Shards[shard] != kv.gid {
 		reply.Err = ErrWrongGroup
 		return
 	}
-	fmt.Println(args.Op, args.Value, "to key", args.Key, "at group", kv.gid, "at config", kv.config.Num)
 	opArg := Op{Operation: args.Op, Key: args.Key, Value: args.Value, Config: kv.config, ClientId: args.Id, CommandId: args.CommandId}
 	index, _, isLeader := kv.rf.Start(opArg)
 	if !isLeader {
 		reply.WrongLeader = true
 		return
 	}
+	fmt.Println(args.Op, args.Value, "to key", args.Key, "(shard", shard, ") at group", kv.gid, "at config", kv.config.Num)
 	reply.WrongLeader = false
 	kv.mu.Lock()
 	_, ok := kv.exeChan[index]
@@ -135,19 +141,26 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	select {
 	case exeArg := <-kv.exeChan[index]:
 		if opArg.ClientId == exeArg.ClientId && opArg.CommandId == exeArg.CommandId {
+			fmt.Println("value of key", opArg.Key, ":", kv.data[opArg.Key])
 			reply.Err = OK
 		} else {
+			fmt.Println("value of key", opArg.Key, ":", kv.data[opArg.Key], ErrPutAppend)
 			reply.Err = ErrPutAppend
 		}
 		return
-	case <-time.After(1234 * time.Millisecond):
+	case <-time.After(2000 * time.Millisecond):
+		fmt.Println("value of key", opArg.Key, ":", kv.data[opArg.Key], ErrTimeOut)
 		reply.Err = ErrTimeOut
 		return
 	}
 }
 
 func (kv *ShardKV) Transfer(args *TransferArgs, reply *TransferReply) {
-	opArg := Op{Operation: "Transfer", Shard: args.Shard, Data: args.Data, Config: kv.config}
+	if args.Config.Num <= kv.transferAck[args.Shard] {
+		reply.Err = ErrDuplicateShard
+		return
+	}
+	opArg := Op{Operation: "Transfer", Shard: args.Shard, Data: args.Data, Config: args.Config}
 	index, _, isLeader := kv.rf.Start(opArg)
 	if !isLeader {
 		reply.WrongLeader = true
@@ -162,6 +175,7 @@ func (kv *ShardKV) Transfer(args *TransferArgs, reply *TransferReply) {
 	kv.mu.Unlock()
 	select {
 	case <-kv.exeChan[index]:
+		kv.transferAck[args.Shard] = args.Config.Num
 		reply.Err = OK
 		return
 	case <-time.After(1234 * time.Millisecond):
@@ -182,12 +196,11 @@ func (kv *ShardKV) Kill() {
 	// Your code here, if desired.
 }
 
-func (kv *ShardKV) Applyloop() {
+func (kv *ShardKV) ApplyLoop() {
 	for kv.alive {
 		applymsg := <-kv.applyCh
-		fmt.Println("applymsg:", applymsg)
+		//fmt.Println("applymsg:", applymsg)
 		if applymsg.UseSnapshot {
-			kv.mu.Lock()
 			r := bytes.NewBuffer(applymsg.Snapshot)
 			d := gob.NewDecoder(r)
 			var dummy int
@@ -196,12 +209,14 @@ func (kv *ShardKV) Applyloop() {
 			d.Decode(&kv.data)
 			d.Decode(&kv.ack)
 			d.Decode(&kv.config)
-			kv.mu.Unlock()
 			continue
 		}
+		//fmt.Println("applymsg:", applymsg)
 		comm := applymsg.Command.(Op)
 		if comm.Operation == "Transfer" {
-			//fmt.Println("transfer shard", comm.Shard)
+			if comm.Config.Num < kv.config.Num {
+				continue
+			}
 			kv.mu.Lock()
 			for key, value := range comm.Data {
 				kv.data[key] = value
@@ -226,8 +241,6 @@ func (kv *ShardKV) Applyloop() {
 				kv.exeChan[applymsg.Index] <- comm
 			}
 			if kv.maxraftstate > 0 && kv.rf.RaftStateSize() >= kv.maxraftstate {
-				fmt.Println("kv.rf.RaftStateSize:", kv.rf.RaftStateSize)
-				fmt.Println("kv.maxraftstate:", kv.maxraftstate)
 				kv.TakeSnapshot(applymsg.Index)
 			}
 			kv.mu.Unlock()
@@ -257,8 +270,6 @@ func (kv *ShardKV) Applyloop() {
 			kv.exeChan[applymsg.Index] <- comm
 		}
 		if kv.maxraftstate > 0 && kv.rf.RaftStateSize() >= kv.maxraftstate {
-			fmt.Println("kv.rf.RaftStateSize:", kv.rf.RaftStateSize)
-			fmt.Println("kv.maxraftstate:", kv.maxraftstate)
 			kv.TakeSnapshot(applymsg.Index)
 		}
 		kv.mu.Unlock()
@@ -272,17 +283,13 @@ func (kv *ShardKV) UpdateConfig() {
 			nextConfig := kv.sm.Query(kv.config.Num + 1)
 			kv.configReq <- nextConfig
 			kv.config = <-kv.configAck
-			//fmt.Println("kv.config:", kv.config)
-			//fmt.Println("nextConfig:", nextConfig)
-
-			//fmt.Println("kv.currConfigIndex of group", kv.gid, "after transfer:", kv.currConfigIndex)
 		}
-		time.Sleep(50 * time.Millisecond)
 	}
 }
 
 func (kv *ShardKV) ReconfigureLoop() {
-	for currConfig := <- kv.configReq {
+	for kv.alive {
+		currConfig := <-kv.configReq
 		if currConfig.Num == 1 {
 			kv.configAck <- currConfig
 			continue
@@ -293,46 +300,51 @@ func (kv *ShardKV) ReconfigureLoop() {
 		}
 		for key, value := range kv.data {
 			shard := key2shard(key)
-			if comm.Config.Shards[shard] != kv.gid {
+			if currConfig.Shards[shard] != kv.gid {
 				sendMaps[shard][key] = value
 				delete(kv.data, key)
 			}
 		}
 
 		for shard := 0; shard < shardmaster.NShards; shard++ {
-			if kv.config.Shards[shard] == kv.gid && comm.Config.Shards[shard] != kv.gid {
+			if kv.config.Shards[shard] == kv.gid && currConfig.Shards[shard] != kv.gid {
 				args := TransferArgs{}
 				args.Shard = shard
 				args.Data = sendMaps[shard]
-				if servers, ok := comm.Config.Groups[comm.Config.Shards[shard]]; ok {
-					si := 0
-					for {
-						srv := kv.make_end(servers[si])
-						var reply TransferReply
-						fmt.Println("group", kv.gid, "sends shard", shard, "to group", comm.Config.Shards[shard], "at config", comm.Config.Num)
-						ok := srv.Call("ShardKV.Transfer", &args, &reply)
-						if ok && reply.WrongLeader == false && reply.Err == OK {
-							break
+				args.Config = currConfig
+				if servers, ok := currConfig.Groups[currConfig.Shards[shard]]; ok {
+					go func(args TransferArgs) {
+						si := 0
+						for {
+							srv := kv.make_end(servers[si])
+							var reply TransferReply
+							ok := srv.Call("ShardKV.Transfer", &args, &reply)
+							if ok && reply.WrongLeader == false && reply.Err == OK {
+								fmt.Println("group", kv.gid, "successfully sends shard", args.Shard, "to group", currConfig.Shards[args.Shard], "at config", currConfig.Num)
+								break
+							}
+							si = (si + 1) % len(servers)
 						}
-						si = (si + 1) % len(servers)
-					}
+					}(args)
 				}
 			}
 		}
 
 		for shard := 0; shard < shardmaster.NShards; shard++ {
-			if kv.config.Shards[shard] != kv.gid && comm.Config.Shards[shard] == kv.gid {
-				fmt.Println("group", kv.gid, "waits for shard", shard, "at config", comm.Config.Num)
-				_, ok := kv.shardChan[comm.Config.Num]
+			if kv.config.Shards[shard] != kv.gid && currConfig.Shards[shard] == kv.gid {
+				fmt.Println("group", kv.gid, "waits for shard", shard, "at config", currConfig.Num)
+				_, ok := kv.shardChan[currConfig.Num]
 				if !ok {
+					kv.mu.Lock()
 					var temp [shardmaster.NShards]chan int
 					for i := 0; i < shardmaster.NShards; i++ {
 						temp[i] = make(chan int, 10)
 					}
-					kv.shardChan[comm.Config.Num] = temp
+					kv.shardChan[currConfig.Num] = temp
+					kv.mu.Unlock()
 				}
-				<-kv.shardChan[comm.Config.Num][shard]
-				fmt.Println("group", kv.gid, "get shard", shard, "at config", comm.Config.Num)
+				<-kv.shardChan[currConfig.Num][shard]
+				fmt.Println("group", kv.gid, "get shard", shard, "at config", currConfig.Num)
 			}
 		}
 		kv.configAck <- currConfig
@@ -340,7 +352,7 @@ func (kv *ShardKV) ReconfigureLoop() {
 }
 
 func (kv *ShardKV) TakeSnapshot(index int) {
-	fmt.Println("group", kv.gid, "takes snapshot at index", index)
+	//fmt.Println("group", kv.gid, "id", kv.me, "takes snapshot at index", index)
 	w := new(bytes.Buffer)
 	e := gob.NewEncoder(w)
 	e.Encode(kv.data)
@@ -348,6 +360,8 @@ func (kv *ShardKV) TakeSnapshot(index int) {
 	e.Encode(kv.config)
 	data := w.Bytes()
 	kv.rf.TakeSnapshot(data, index)
+
+	//fmt.Println("RaftStatSize of group", kv.gid, "id", kv.me, "after snapshot:", kv.rf.RaftStateSize())
 }
 
 //
@@ -357,11 +371,11 @@ func (kv *ShardKV) TakeSnapshot(index int) {
 //
 // the k/v server should store snapshots with
 // persister.SaveSnapshot(), and Raft should save its state (including
-// log) with persister.SaveRaftState().
+// fmt) with persister.SaveRaftState().
 //
 // the k/v server should snapshot when Raft's saved state exceeds
 // maxraftstate bytes, in order to allow Raft to garbage-collect its
-// log. if maxraftstate is -1, you don't need to snapshot.
+// fmt. if maxraftstate is -1, you don't need to snapshot.
 //
 // gid is this group's GID, for interacting with the shardmaster.
 //
@@ -393,38 +407,60 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	// Your initialization code here.
 
 	fmt.Println("group", kv.gid, "starts")
-	// Use something like this to talk to the shardmaster:
-	kv.alive = true
+
 	kv.sm = shardmaster.MakeClerk(kv.masters)
 	kv.applyCh = make(chan raft.ApplyMsg, 100)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	kv.data = make(map[string]string)
 	kv.exeChan = make(map[int]chan Op)
-	kv.configChan = make(chan shardmaster.Config, 100)
 	kv.ack = make(map[int64]int)
 	kv.shardChan = make(map[int][shardmaster.NShards]chan int)
 
-	fmt.Println(kv.rf.Log)
+	kv.configReq = make(chan shardmaster.Config, 1)
+	kv.configAck = make(chan shardmaster.Config, 1)
 
-	for i := 0; i < len(kv.rf.Log); i++ {
-		if kv.rf.Log[i].Index == 0 {
-			continue
+	fmt.Println("data of group", kv.gid, ":", kv.data)
+	fmt.Println("log of group", kv.gid, ":", kv.rf.Log)
+
+	select {
+	case applymsg := <-kv.applyCh:
+		//fmt.Println("snapshot:", applymsg)
+		if applymsg.UseSnapshot {
+			r := bytes.NewBuffer(applymsg.Snapshot)
+			d := gob.NewDecoder(r)
+			var dummy int
+			d.Decode(&dummy)
+			d.Decode(&dummy)
+			d.Decode(&kv.data)
+			d.Decode(&kv.ack)
+			d.Decode(&kv.config)
 		}
-		comm := kv.rf.Log[i].Command.(Op)
-		if comm.Operation == "Put" {
-			kv.data[comm.Key] = comm.Value
-			kv.ack[comm.ClientId] = comm.CommandId
-		} else if comm.Operation == "Append" {
-			kv.data[comm.Key] += comm.Value
-			kv.ack[comm.ClientId] = comm.CommandId
-		} else if comm.Operation == "Transfer" {
-			for key, value := range comm.Data {
-				kv.data[key] = value
-			}
-		}
-		kv.config = comm.Config
+	default:
 	}
+
+	/*
+		for i := 0; i < len(kv.rf.Log); i++ {
+			if kv.rf.Log[i].Index == 0 {
+				continue
+			}
+			comm := kv.rf.Log[i].Command.(Op)
+			if comm.Operation == "Put" {
+				kv.data[comm.Key] = comm.Value
+				kv.ack[comm.ClientId] = comm.CommandId
+			} else if comm.Operation == "Append" {
+				kv.data[comm.Key] += comm.Value
+				kv.ack[comm.ClientId] = comm.CommandId
+			} else if comm.Operation == "Transfer" {
+				for key, value := range comm.Data {
+					kv.data[key] = value
+				}
+			}
+			kv.config = comm.Config
+		}
+	*/
+
+	kv.alive = true
 
 	go kv.ApplyLoop()
 	go kv.UpdateConfig()

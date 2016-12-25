@@ -20,7 +20,6 @@ package raft
 import (
 	"bytes"
 	"encoding/gob"
-	"fmt"
 	"labrpc"
 	"math/rand"
 	"sync"
@@ -202,7 +201,7 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 		return
 	}
 	reply.Success = true
-	//if len(args.Entries) > 0 {
+	//if len(args.Entries) >= 0 {
 	//	fmt.Println("peer", rf.me, "receives entry", args.PrevLogIndex+1, "-", args.PrevLogIndex+len(args.Entries), "from leader", args.LeaderId)
 	//}
 	if len(rf.Log) > 0 {
@@ -220,8 +219,8 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 }
 
 func (rf *Raft) sendAppendEntries(server int, args AppendEntriesArgs, reply *AppendEntriesReply) bool {
-	//if len(args.Entries) > 0 {
-	//fmt.Println("leader", rf.me, "send entry", args.PrevLogIndex+1, "-", args.PrevLogIndex+len(args.Entries), "to peer", server)
+	//if len(args.Entries) >= 0 {
+	//	fmt.Println("leader", rf.me, "send entry", args.PrevLogIndex+1, "-", args.PrevLogIndex+len(args.Entries), "to peer", server)
 	//}
 	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
 	if ok {
@@ -236,6 +235,7 @@ func (rf *Raft) sendAppendEntries(server int, args AppendEntriesArgs, reply *App
 		if reply.Success == true {
 			rf.nextIndex[server] = args.PrevLogIndex + len(args.Entries) + 1
 			rf.matchIndex[server] = args.PrevLogIndex + len(args.Entries)
+			//fmt.Println("rf.matchIndex[", server, "]:", rf.matchIndex[server])
 		} else {
 			rf.nextIndex[server] = reply.NextIndex
 		}
@@ -254,7 +254,11 @@ func (rf *Raft) sendAppendEntriesToAll() {
 					count++
 				}
 			}
-			if count > len(rf.peers)/2 && rf.Log[N-rf.Log[0].Index].Term == rf.CurrentTerm {
+			//fmt.Println("count:", count)
+			//fmt.Println("len(rf.peers)/2:", len(rf.peers)/2)
+			//fmt.Println("rf.Log[N-rf.Log[0].Index].Term:", rf.Log[N-rf.Log[0].Index].Term)
+			//fmt.Println("rf.CurrentTerm:", rf.CurrentTerm)
+			if count > len(rf.peers)/2 && rf.Log[N-rf.Log[0].Index].Term <= rf.CurrentTerm {
 				rf.CommitIndex = N
 				rf.commitNow <- true
 				break
@@ -519,27 +523,17 @@ func (rf *Raft) eventloop() {
 
 func (rf *Raft) commitloop() {
 	for rf.alive {
-		select {
-		case <-rf.commitNow:
-			for i := rf.lastApplied + 1; i <= rf.CommitIndex; i++ {
-				//fmt.Println("peer", rf.me, "apply entry", i)
-				//fmt.Println(rf.Log)
-				rf.lastApplied = i
-				var args ApplyMsg
-				args.Index = i
-				args.Command = rf.Log[i-rf.Log[0].Index].Command
-				rf.ApplyChan <- args
-			}
+		<-rf.commitNow
+		for i := rf.lastApplied + 1; i <= rf.CommitIndex; i++ {
+			//fmt.Println("peer", rf.me, "apply entry", i)
+			//fmt.Println(rf.Log)
+			rf.lastApplied = i
+			var args ApplyMsg
+			args.Index = i
+			args.Command = rf.Log[i-rf.Log[0].Index].Command
+			rf.ApplyChan <- args
 		}
 	}
-}
-
-func (rf *Raft) SaveSnapshot(snapshot []byte) {
-	rf.persister.SaveSnapshot(snapshot)
-}
-
-func (rf *Raft) ReadSnapshot() []byte {
-	return rf.persister.ReadSnapshot()
 }
 
 func (rf *Raft) TakeSnapshot(snapshot []byte, index int) {
@@ -552,11 +546,12 @@ func (rf *Raft) TakeSnapshot(snapshot []byte, index int) {
 	data := w.Bytes()
 	data = append(data, snapshot...)
 	rf.persister.SaveSnapshot(data)
-	fmt.Println("raftstate before snapshot:", rf.persister.ReadRaftState())
+	//fmt.Println("raftstate before snapshot:", rf.persister.ReadRaftState())
 	rf.Log = rf.Log[index+1-rf.Log[0].Index:]
+	//fmt.Println("Log after snapshot:", rf.Log)
 	rf.persist()
-	fmt.Println("rf.RaftStatSize after snapshot:", rf.RaftStateSize)
-	fmt.Println("raftstate after snapshot:", rf.persister.ReadRaftState())
+	//fmt.Println("rf.RaftStatSize after snapshot:", rf.RaftStateSize())
+	//fmt.Println("raftstate after snapshot:", rf.persister.ReadRaftState())
 }
 
 func (rf *Raft) readSnapshot(snapshot []byte) {
