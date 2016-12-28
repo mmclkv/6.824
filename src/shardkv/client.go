@@ -14,6 +14,7 @@ import (
 	"math/big"
 	"shardmaster"
 	"time"
+	//"fmt"
 )
 
 //
@@ -82,6 +83,7 @@ func (ck *Clerk) Get(key string) string {
 	args.CommandId = ck.commandId
 
 	for {
+		args.Config = ck.config
 		shard := key2shard(key)
 		gid := ck.config.Shards[shard]
 		if servers, ok := ck.config.Groups[gid]; ok {
@@ -89,7 +91,9 @@ func (ck *Clerk) Get(key string) string {
 			for si := 0; si < len(servers); si++ {
 				srv := ck.make_end(servers[si])
 				var reply GetReply
+				//fmt.Println("Get", args.Key, "(shard", shard, ") at group", gid, "at config", args.Config.Num)
 				ok := srv.Call("ShardKV.Get", &args, &reply)
+				//fmt.Println(reply.Err)
 				if ok && reply.WrongLeader == false && (reply.Err == OK || reply.Err == ErrNoKey) {
 					return reply.Value
 				}
@@ -99,7 +103,7 @@ func (ck *Clerk) Get(key string) string {
 			}
 		}
 		time.Sleep(100 * time.Millisecond)
-		// ask master for the latest configuration.
+		// ask master for the latest configuration
 		ck.config = ck.sm.Query(-1)
 	}
 
@@ -111,20 +115,26 @@ func (ck *Clerk) Get(key string) string {
 // You will have to modify this function.
 //
 func (ck *Clerk) PutAppend(key string, value string, op string) {
+	
 	args := PutAppendArgs{}
 	args.Key = key
 	args.Value = value
+	args.Id = ck.Id
 	args.Op = op
 	ck.commandId++
 	args.CommandId = ck.commandId
-	for {
+
+	for {		
+		args.Config = ck.config
 		shard := key2shard(key)
 		gid := ck.config.Shards[shard]
 		if servers, ok := ck.config.Groups[gid]; ok {
 			for si := 0; si < len(servers); si++ {
 				srv := ck.make_end(servers[si])
 				var reply PutAppendReply
-				ok := srv.Call("ShardKV.PutAppend", &args, &reply)
+				//fmt.Println(args.Op, args.Value, "to key", args.Key, "(shard", shard, ") at group", gid, "at config", args.Config.Num)
+				ok := srv.Call("ShardKV.PutAppend", &args, &reply)			
+				//fmt.Println(reply.Err)
 				if ok && reply.WrongLeader == false && reply.Err == OK {
 					return
 				}

@@ -6,6 +6,7 @@ import (
 	"raft"
 	"sync"
 	"time"
+	//"fmt"
 )
 
 type ShardMaster struct {
@@ -58,7 +59,6 @@ func (sm *ShardMaster) Join(args *JoinArgs, reply *JoinReply) {
 		}
 		reverseShardTable[value] = append(reverseShardTable[value], index)
 	}
-	//fmt.Println("reverseShardTable:", reverseShardTable)
 	var thisConfig Config
 	thisConfig.Groups = make(map[int][]string)
 	newLen := len(args.Servers) + len(sm.Groups)
@@ -122,7 +122,6 @@ func (sm *ShardMaster) Join(args *JoinArgs, reply *JoinReply) {
 				numOfLess++
 			}
 		}
-		//fmt.Println("reverseShardTable after apply:", reverseShardTable)
 	}
 
 	for key, value := range sm.Groups {
@@ -135,14 +134,10 @@ func (sm *ShardMaster) Join(args *JoinArgs, reply *JoinReply) {
 	for key, values := range reverseShardTable {
 		for _, value := range values {
 			thisConfig.Shards[value] = key
-			//fmt.Println("thisConfig.Shards[", value, "]=", key)
 		}
 	}
-	//fmt.Println("ShardTable after apply:", thisConfig.Shards)
 	OpArg := Op{Conf: thisConfig, ClientId: args.Id, CommandId: args.CommandId}
 	index, _, _ := sm.rf.Start(OpArg)
-	//fmt.Println("current Shard:", sm.Shards)
-	//fmt.Println("current Group:", sm.Groups)
 	//fmt.Println("joins", args.Servers)
 	//sm.mu.Lock()
 	_, ok := sm.exeChan[index]

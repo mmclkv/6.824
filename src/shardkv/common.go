@@ -10,10 +10,17 @@ import "shardmaster"
 //
 // You will have to modify these definitions.
 //
+const (
+	ToClient = iota
+	ToServer
+	Private
+)
 
 const (
 	OK                = "OK"
 	ErrNoKey          = "ErrNoKey"
+	ErrNotAlive       = "ErrNotAlive"
+	ErrNotLeader      = "ErrNotLeader"
 	ErrWrongGroup     = "ErrWrongGroup"
 	ErrTimeOut        = "ErrTimeOut"
 	ErrGet            = "ErrGet"
@@ -21,6 +28,8 @@ const (
 	ErrTransfer       = "ErrTransfer"
 	ErrOldConfig      = "ErrOldConfig"
 	ErrDuplicateShard = "ErrDuplicateShard"
+	ErrConfiguring    = "ErrConfiguring"
+	ErrNotConfiguring = "ErrNotConfiguring"
 )
 
 type Err string
@@ -33,6 +42,7 @@ type PutAppendArgs struct {
 	Op        string // "Put" or "Append"
 	Id        int64
 	CommandId int
+	Config    shardmaster.Config
 	// You'll have to add definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
@@ -44,10 +54,11 @@ type PutAppendReply struct {
 }
 
 type GetArgs struct {
-	Key string
-	// You'll have to add definitions here.
+	Key       string
+	Value     string // You'll have to add definitions here.
 	Id        int64
 	CommandId int
+	Config    shardmaster.Config
 }
 
 type GetReply struct {

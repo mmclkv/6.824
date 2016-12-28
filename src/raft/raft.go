@@ -24,6 +24,7 @@ import (
 	"math/rand"
 	"sync"
 	"time"
+	//"fmt"
 )
 
 const (
@@ -157,7 +158,6 @@ type InstallSnapshotReply struct {
 func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	defer rf.persist()
 	reply.Term = rf.CurrentTerm
 	if args.Term < rf.CurrentTerm { // not a legal leader
 		reply.Success = false
@@ -181,6 +181,11 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 		reply.NextIndex = lastIndex + 1
 		return
 	}
+	if args.PrevLogIndex + len(args.Entries) <= rf.CommitIndex {
+		reply.Success = false
+		reply.NextIndex = rf.CommitIndex + 1
+		return
+	}
 	var lastTerm int
 	if len(rf.Log) == 0 || args.PrevLogIndex < rf.Log[0].Index {
 		lastTerm = rf.lastIncludedTerm
@@ -201,14 +206,18 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 		return
 	}
 	reply.Success = true
-	//if len(args.Entries) >= 0 {
+	//if len(args.Entries) > 0 {
 	//	fmt.Println("peer", rf.me, "receives entry", args.PrevLogIndex+1, "-", args.PrevLogIndex+len(args.Entries), "from leader", args.LeaderId)
 	//}
 	if len(rf.Log) > 0 {
 		rf.Log = rf.Log[:args.PrevLogIndex-rf.Log[0].Index+1]
 	}
 	rf.Log = append(rf.Log, args.Entries...)
+	rf.persist()
+	//fmt.Println("log of peer", rf.me, ":", rf.Log)
 	if len(rf.Log) > 0 && args.LeaderCommit > rf.CommitIndex {
+		//fmt.Println("args.LeaderCommit of", rf.me, ":", args.LeaderCommit)
+		//fmt.Println("rf.Log[len(rf.Log)-1].Index of", rf.me, ":", rf.Log[len(rf.Log)-1].Index)
 		if args.LeaderCommit < rf.Log[len(rf.Log)-1].Index {
 			rf.CommitIndex = args.LeaderCommit
 		} else {
@@ -219,8 +228,8 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 }
 
 func (rf *Raft) sendAppendEntries(server int, args AppendEntriesArgs, reply *AppendEntriesReply) bool {
-	//if len(args.Entries) >= 0 {
-	//	fmt.Println("leader", rf.me, "send entry", args.PrevLogIndex+1, "-", args.PrevLogIndex+len(args.Entries), "to peer", server)
+	//if len(args.Entries) > 0 {
+		//fmt.Println("leader", rf.me, "send entry", args.PrevLogIndex+1, "-", args.PrevLogIndex+len(args.Entries), "to peer", server)
 	//}
 	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
 	if ok {
@@ -321,7 +330,6 @@ func (rf *Raft) sendInstallSnapshot(server int, args InstallSnapshotArgs, reply 
 func (rf *Raft) InstallSnapshot(args InstallSnapshotArgs, reply *InstallSnapshotReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	defer rf.persist()
 	reply.Term = rf.CurrentTerm
 	if args.Term < rf.CurrentTerm {
 		return
@@ -341,6 +349,7 @@ func (rf *Raft) InstallSnapshot(args InstallSnapshotArgs, reply *InstallSnapshot
 		i = len(rf.Log) - 1
 	}
 	rf.Log = rf.Log[i+1:]
+	rf.persist()
 	msg := ApplyMsg{UseSnapshot: true, Snapshot: args.Snapshot}
 	rf.ApplyChan <- msg
 }
@@ -524,19 +533,30 @@ func (rf *Raft) eventloop() {
 func (rf *Raft) commitloop() {
 	for rf.alive {
 		<-rf.commitNow
+		rf.mu.Lock()
 		for i := rf.lastApplied + 1; i <= rf.CommitIndex; i++ {
 			//fmt.Println("peer", rf.me, "apply entry", i)
-			//fmt.Println(rf.Log)
+			//fmt.Println("peer", rf.me, "'s commitIndex:", rf.CommitIndex)
+			
 			rf.lastApplied = i
 			var args ApplyMsg
 			args.Index = i
+			//if rf.IsLeader() {
+			//	fmt.Println("Leader")
+			//}
+			//fmt.Println(rf.Log)
+			//fmt.Println("i:", i)
+			//fmt.Println("rf.Log[0].Index:", rf.Log[0].Index)
 			args.Command = rf.Log[i-rf.Log[0].Index].Command
-			rf.ApplyChan <- args
+			rf.ApplyChan <- args			
 		}
+		rf.mu.Unlock()
 	}
 }
 
 func (rf *Raft) TakeSnapshot(snapshot []byte, index int) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 	rf.lastIncludedIndex = index
 	rf.lastIncludedTerm = rf.Log[index-rf.Log[0].Index].Term
 	w := new(bytes.Buffer)
