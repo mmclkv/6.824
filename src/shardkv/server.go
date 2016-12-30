@@ -40,7 +40,6 @@ type ShardKV struct {
 
 	// Your definitions here.
 	alive       bool
-	endofConfig bool
 	mode        int
 	sm          *shardmaster.Clerk
 	config      shardmaster.Config
