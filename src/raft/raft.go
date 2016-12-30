@@ -123,9 +123,11 @@ func (rf *Raft) readPersist(data []byte) {
 	// Example:
 	r := bytes.NewBuffer(data)
 	d := gob.NewDecoder(r)
+	rf.mu.Lock()
 	d.Decode(&rf.CurrentTerm)
 	d.Decode(&rf.VotedFor)
 	d.Decode(&rf.Log)
+	rf.mu.Unlock()
 }
 
 type AppendEntriesArgs struct {
@@ -181,7 +183,7 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 		reply.NextIndex = lastIndex + 1
 		return
 	}
-	if args.PrevLogIndex + len(args.Entries) <= rf.CommitIndex {
+	if args.PrevLogIndex+len(args.Entries) <= rf.CommitIndex {
 		reply.Success = false
 		reply.NextIndex = rf.CommitIndex + 1
 		return
@@ -229,7 +231,7 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 
 func (rf *Raft) sendAppendEntries(server int, args AppendEntriesArgs, reply *AppendEntriesReply) bool {
 	//if len(args.Entries) > 0 {
-		//fmt.Println("leader", rf.me, "send entry", args.PrevLogIndex+1, "-", args.PrevLogIndex+len(args.Entries), "to peer", server)
+	//fmt.Println("leader", rf.me, "send entry", args.PrevLogIndex+1, "-", args.PrevLogIndex+len(args.Entries), "to peer", server)
 	//}
 	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
 	if ok {
@@ -537,7 +539,7 @@ func (rf *Raft) commitloop() {
 		for i := rf.lastApplied + 1; i <= rf.CommitIndex; i++ {
 			//fmt.Println("peer", rf.me, "apply entry", i)
 			//fmt.Println("peer", rf.me, "'s commitIndex:", rf.CommitIndex)
-			
+
 			rf.lastApplied = i
 			var args ApplyMsg
 			args.Index = i
@@ -548,7 +550,7 @@ func (rf *Raft) commitloop() {
 			//fmt.Println("i:", i)
 			//fmt.Println("rf.Log[0].Index:", rf.Log[0].Index)
 			args.Command = rf.Log[i-rf.Log[0].Index].Command
-			rf.ApplyChan <- args			
+			rf.ApplyChan <- args
 		}
 		rf.mu.Unlock()
 	}
