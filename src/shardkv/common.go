@@ -28,6 +28,7 @@ const (
 	ErrTransfer       = "ErrTransfer"
 	ErrOldConfig      = "ErrOldConfig"
 	ErrDuplicateShard = "ErrDuplicateShard"
+	ErrDuplicateFinish = "ErrDuplicateFinish"
 	ErrConfiguring    = "ErrConfiguring"
 	ErrNotConfiguring = "ErrNotConfiguring"
 )
@@ -70,10 +71,29 @@ type GetReply struct {
 type TransferArgs struct {
 	Shard  int
 	Data   map[string]string
+	Ack    map[int64]int
 	Config shardmaster.Config
 }
 
 type TransferReply struct {
+	WrongLeader bool
+	Err         Err
+}
+
+type FinishArgs struct {
+	Config shardmaster.Config
+}
+
+type FinishReply struct {
+	WrongLeader bool 
+	Err         Err
+}
+
+type UpdateArgs struct {
+	Config shardmaster.Config
+}
+
+type UpdateReply struct {
 	WrongLeader bool
 	Err         Err
 }

@@ -79,10 +79,10 @@ func (ck *Clerk) Get(key string) string {
 	args := GetArgs{}
 	args.Key = key
 	args.Id = ck.Id
-	ck.commandId++
-	args.CommandId = ck.commandId
 
 	for {
+		ck.commandId++
+		args.CommandId = ck.commandId
 		args.Config = ck.config
 		shard := key2shard(key)
 		gid := ck.config.Shards[shard]
@@ -115,7 +115,7 @@ func (ck *Clerk) Get(key string) string {
 // You will have to modify this function.
 //
 func (ck *Clerk) PutAppend(key string, value string, op string) {
-	
+
 	args := PutAppendArgs{}
 	args.Key = key
 	args.Value = value
@@ -124,7 +124,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	ck.commandId++
 	args.CommandId = ck.commandId
 
-	for {		
+	for {
 		args.Config = ck.config
 		shard := key2shard(key)
 		gid := ck.config.Shards[shard]
@@ -133,7 +133,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 				srv := ck.make_end(servers[si])
 				var reply PutAppendReply
 				//fmt.Println(args.Op, args.Value, "to key", args.Key, "(shard", shard, ") at group", gid, "at config", args.Config.Num)
-				ok := srv.Call("ShardKV.PutAppend", &args, &reply)			
+				ok := srv.Call("ShardKV.PutAppend", &args, &reply)
 				//fmt.Println(reply.Err)
 				if ok && reply.WrongLeader == false && reply.Err == OK {
 					return
